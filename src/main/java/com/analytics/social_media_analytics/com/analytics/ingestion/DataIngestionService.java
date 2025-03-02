@@ -4,51 +4,79 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import twitter4j.Query;
-import twitter4j.Status;
-import twitter4j.Twitter;
-import twitter4j.TwitterException;
-import twitter4j.TwitterFactory;
-import twitter4j.conf.ConfigurationBuilder;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 
 @Service
 public class DataIngestionService {
 
-    @Value("${twitter.consumer-key}")
-    private String consumerKey;
-
-    @Value("${twitter.consumer-secret}")
-    private String consumerSecret;
-
-    @Value("${twitter.access-token}")
-    private String accessToken;
-
-    @Value("${twitter.access-token-secret}")
-    private String accessTokenSecret;
+    @Value("${twitter.bearer-token}") // Use Bearer Token for X API v2
+    private String bearerToken;
 
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final RestTemplate restTemplate;
 
-    public DataIngestionService(KafkaTemplate<String, String> kafkaTemplate) {
+    public DataIngestionService(KafkaTemplate<String, String> kafkaTemplate, RestTemplate restTemplate) {
         this.kafkaTemplate = kafkaTemplate;
+        this.restTemplate = restTemplate;
     }
 
-    @Scheduled(fixedRate = 60000) // Fetch tweets every minute
-    public void fetchTweets() throws TwitterException {
-        ConfigurationBuilder cb = new ConfigurationBuilder();
-        cb.setDebugEnabled(true)
-                .setOAuthConsumerKey(consumerKey)
-                .setOAuthConsumerSecret(consumerSecret)
-                .setOAuthAccessToken(accessToken)
-                .setOAuthAccessTokenSecret(accessTokenSecret);
+    @Scheduled(fixedRate = 900000) // Fetch tweets every 15 minutes (Free Tier limit)
+    public void fetchTweets() {
+        String query = "AI"; // Search query
+        String url = "https://api.twitter.com/2/tweets/search/recent?query=" + query + "&max_results=10"; // Free Tier allows 10 results per request
 
-        Twitter twitter = new TwitterFactory(cb.build()).getInstance();
-        Query query = new Query("#AI");
-        List<Status> tweets = twitter.search(query).getTweets();
+        // Set up headers with Bearer Token
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + bearerToken);
+        HttpEntity<String> entity = new HttpEntity<>(headers);
 
-        for (Status tweet : tweets) {
-            kafkaTemplate.send("raw-posts", tweet.getText());
+        // Make the HTTP GET request
+        ResponseEntity<TwitterResponse> response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                entity,
+                TwitterResponse.class
+        );
+
+        // Process the response
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            List<Tweet> tweets = response.getBody().getData();
+            for (Tweet tweet : tweets) {
+                kafkaTemplate.send("raw-posts", tweet.getText()); // Send tweet text to Kafka
+            }
+        } else {
+            System.err.println("Failed to fetch tweets: " + response.getStatusCode());
+        }
+    }
+
+    // Define classes to map the X API v2 response
+    private static class TwitterResponse {
+        private List<Tweet> data;
+
+        public List<Tweet> getData() {
+            return data;
+        }
+
+        public void setData(List<Tweet> data) {
+            this.data = data;
+        }
+    }
+
+    private static class Tweet {
+        private String text;
+
+        public String getText() {
+            return text;
+        }
+
+        public void setText(String text) {
+            this.text = text;
         }
     }
 }

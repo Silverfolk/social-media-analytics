@@ -1,0 +1,4 @@
+com\analytics\social_media_analytics\com\analytics\ingestion\DataIngestionService.class
+com\analytics\social_media_analytics\com\analytics\ingestion\DataIngestionService$TwitterResponse.class
+com\analytics\social_media_analytics\com\analytics\ingestion\DataIngestionService$Tweet.class
+com\analytics\social_media_analytics\SocialMediaAnalyticsApplication.class
